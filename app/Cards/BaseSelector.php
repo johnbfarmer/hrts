@@ -393,11 +393,15 @@ $this->writeln('this trick DOES NOT have points');
         $cards = $data['cards'];
         $passing = !$data['noPassing'];
         $gameScores = $data['gameScores'];
+        $roundScores = $data['roundScores'];
         $riskTolerance = $data['riskTolerance'];
         $unplayedCards = $data['unplayedCards'];
         $this->analyzeHand($cards, $unplayedCards);
-        if ($this->shouldShootTheMoon($cards, $passing, $gameScores, $riskTolerance)) {
+        if ($this->shouldShootTheMoon($data)) {
             return 'shootTheMoon';
+        }
+        if ($this->shouldDefendAgainstShoot($data)) {
+            return 'defendAgainstShoot';
         }
         return 'avoidPoints';
     }
@@ -561,16 +565,58 @@ $this->writeln('this trick DOES NOT have points');
         return combo($numUnknownInSuit, $targetNumber) * combo($numCardsOtherPlayers, $numUnknownInSuit-$targetNumber) / combo($numUnknown, $numUnknownInSuit);
     }
 
-    public function shouldShootTheMoon($cards, $passing, $scores, $riskTolerance)
+    public function shouldDefendAgainstShoot($data) {
+        $cards = $data['cards'];
+        $passing = !$data['noPassing'];
+        $gameScores = $data['gameScores'];
+        $roundScores = $data['roundScores'];
+        $riskTolerance = $data['riskTolerance'];
+        $unplayedCards = $data['unplayedCards'];
+        $myId = $data['myId'];
+        $iHavePoints = $data['iHavePoints'];
+        $numPlayersWithPoints = $data['numPlayersWithPoints'];
+        $totalPoints = $data['totalPoints'];
+        if ($passing) {
+            return false;
+        }
+        // if more than one person has points, or if I do, false
+        if ($numPlayersWithPoints > 1) {
+            return false;
+        }
+        if ($numPlayersWithPoints === 1 && $iHavePoints) {
+            return false;
+        }
+        if ($numPlayersWithPoints === 1) {
+            return $totalPoints > 5; // more work to do here
+        }
+    }
+
+    public function shouldShootTheMoon($data)
     {
+        $cards = $data['cards'];
+        $passing = !$data['noPassing'];
+        $gameScores = $data['gameScores'];
+        $roundScores = $data['roundScores'];
+        $riskTolerance = $data['riskTolerance'];
+        $unplayedCards = $data['unplayedCards'];
+        $myId = $data['myId'];
+        $iHavePoints = $data['iHavePoints'];
+        $numPlayersWithPoints = $data['numPlayersWithPoints'];
+        $totalPoints = $data['totalPoints'];
+        // no longer needed? see player.analyzeHand
         if (count($cards) < 2) {
+            return false;
+        }
+        if ($numPlayersWithPoints > 1) {
+            return false;
+        }
+        if ($numPlayersWithPoints === 1 && !$iHavePoints) {
             return false;
         }
         $riskSumAvp = 0;
         $riskSumStm = 0;
         // do others have points?
         // will successfully shooting lose me the game?
-        // 
         foreach ($this->handAnalysis['AVP'] as $danger) {
             $riskSumAvp += $danger;
         }
@@ -586,11 +632,9 @@ $this->writeln('this trick DOES NOT have points');
             foreach ($cardsToPass['STM'] as $idx) {
                 $riskSumStm -= $this->handAnalysis['STM'][$idx];
             }
-            // passing means also receiving; let's adjust for vulerability; fcn should return expected vals for 3 cards
+            // passing means also receiving; let's adjust for vulnerability; fcn should return expected vals for 3 cards
             $riskSumStm += $this->getStmVulnerabilityOfPass($cards, $cardsToPass['STM']);
         }
-
-
 
         // let's try risk tolerance times stmscore, adjusted for cards left, compared to stmThreshold 
         $normalizedStm = $riskSumStm / count($cards) * 13;
@@ -600,25 +644,6 @@ $this->writeln('this trick DOES NOT have points');
         $this->writeln((1-$riskTolerance).' * '.$normalizedStm.' < '.$stmThreshold);
         $this->writeln("shouldShootTheMoon $decision, $stmThreshold, $riskTolerance, $riskSumAvp, $normalizedStm");
         return $decision;
-        // $this->writeln('('.$riskSumAvp .' > '.$this->avpThreshold.' && '.$riskSumStm.' < '.$this->stmThreshold.') || ('.$riskTolerance.' * '.$riskSumAvp.' > '.$riskSumStm.')');
-
-
-        // if ($riskSumAvp > $this->avpThreshold && $riskSumStm < $this->stmThreshold) {
-        //     $this->writeln( "avp > avpThreshold && stm < stmThreshold");
-        // }
-
-        // $pctLeft = count($cards) / 13;
-
-        // if ($riskSumAvp > $pctLeft*$this->avpThreshold && $riskSumStm < $pctLeft*$this->stmThreshold) {
-            // $this->writeln( "avp > avpThreshold && stm < stmThreshold. pctLeft: $pctLeft");
-        // }
-
-        // if ($riskTolerance * $riskSumAvp > $riskSumStm) {
-            // $this->writeln( "riskTolerance * riskSumAvp > riskSumStm");
-        // }
-
-        // return ($riskSumAvp > $this->avpThreshold && $riskSumStm < $this->stmThreshold) || ($riskTolerance * $riskSumAvp > $riskSumStm); // FIX, adjust to constant inquiry, not just at beginning
-
     }
 
     protected function calculateRatings($data, $unplayedCards)

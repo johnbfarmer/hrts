@@ -19,6 +19,7 @@ class Player extends BaseProcess {
     protected $handAnalysis = ['AVP' => [], 'STM' => []];
     protected $trickStrategy;
     protected $selector;
+    protected $intel;
 
     public function __construct($id, $data = null)
     {
@@ -38,7 +39,11 @@ class Player extends BaseProcess {
     {
         $this->hand = $hand;
         $this->isHoldHand = $isHoldHand;
-        $this->unplayedCards = $this->getUnplayedCards();
+        $this->intel = new Intel([
+            'id' => $this->id,
+            'hand' => $this->hand,
+        ]);
+        $this->unplayedCards = $this->intel->getUnplayedCards();
         $this->cardsPlayedThisRound = [];
         $this->cardPlayed = null;
         $this->playersVoidInSuit = [[],[],[],[]];
@@ -86,7 +91,7 @@ class Player extends BaseProcess {
                 $cardToPlayIdx = $this->selectLeadCard($eligibleCards, $isFirstTrick);
             }
         } else {
-            $this->unplayedCards = $this->removeFromUnplayed($cardsPlayedThisTrick);
+            $this->unplayedCards = $this->intel->removeFromUnplayed($cardsPlayedThisTrick);
             $suit = array_values($cardsPlayedThisTrick)[0]->getSuit();
             $eligibleCards = $this->hand->getEligibleCards($suit, $isFirstTrick);
             $cardToPlayIdx = $this->selectCard($eligibleCards, $isFirstTrick, $cardsPlayedThisTrick);
@@ -108,24 +113,36 @@ class Player extends BaseProcess {
     public function analyzeHand($passingWillHappen = false)
     {
         if (array_sum($this->roundScores) > 25 || count($this->hand->getCards()) < 2) {
-$this->writeln(array_sum($this->roundScores));
-$this->writeln(count($this->hand->getCards()));
             return;
         }
         $newHandStrategy = null;
+        $numPlayersWithPoints = 0;
+        $iHavePoints = false;
+        $totalPoints = 0;
         foreach ($this->roundScores as $idx => $roundScore) {
-            if ($roundScore && $idx != $this->id) {
-                $newHandStrategy = 'avoidPoints';
-                $this->writeln($this->name . ': someone has points');
+            if ($roundScore) {
+                $numPlayersWithPoints++;
+                $totalPoints += $roundScore;
+                if ($idx === $this->id) {
+                    $iHavePoints = true;
+                }
             }
+        }
+        if ($numPlayersWithPoints > 1) {
+            $newHandStrategy = 'avoidPoints';
         }
         if (is_null($newHandStrategy)) {
             $newHandStrategy = $this->selector->getRoundStrategy([
                 'cards' => $this->hand->getCards(),
                 'noPassing' => !$passingWillHappen,
                 'gameScores' => $this->gameScores,
+                'roundScores' => $this->roundScores,
                 'riskTolerance' => $this->riskTolerance,
                 'unplayedCards' => $this->unplayedCards,
+                'myId' => $this->id,
+                'iHavePoints' => $iHavePoints,
+                'numPlayersWithPoints' => $numPlayersWithPoints,
+                'totalPoints' => $totalPoints,
             ]);
             $this->writeln($this->name . ' strategy: ' . $newHandStrategy);
         }
@@ -144,6 +161,8 @@ $this->writeln(count($this->hand->getCards()));
         switch ($this->handStrategy) {
             case 'shootTheMoon':
                 return new ShootTheMoonSelector(['handAnalysis' => $this->handAnalysis]);
+            case 'defendAgainstShoot':
+                return new DefendAgainstShootSelector(['handAnalysis' => $this->handAnalysis]);
             default:
                 return new DefaultSelector(['handAnalysis' => $this->handAnalysis]);
         }
@@ -185,93 +204,105 @@ $this->writeln(count($this->hand->getCards()));
 
     public function gatherInfo($info)
     {
-        $leadSuit = null;
-        $topValue = null;
-        $this->gameScores = !empty($info['gameScores']) ? $info['gameScores'] : $this->gameScores;
-        if (!empty($info['gameScores'])) {
-            foreach ($this->gameScores as $id => $score) {
-                $this->roundScores[$id] = 0;
-            }
-        }
-
-        $this->unplayedCards = $this->removeFromUnplayed($info['cardsPlayed']);
-
-        foreach ($info['cardsPlayed'] as $id => $c) {
-            if (empty($this->cardsPlayedThisRound[$id])) {
-                $this->cardsPlayedThisRound[$id] = [];
-            }
-            $this->cardsPlayedThisRound[$id][] = $c;
-            if (is_null($leadSuit)) {
-                $leadSuit = $c->getSuit();
-                $topValue = $c->getValue();
-                $takesTrick = $id;
-                $points = 0;
-            }
-            $suit = $c->getSuit();
-            $value = $c->getValue();
-            if ($suit === 2) {
-                $points++;
-            }
-            if ($suit === 3 && $value == 10) {
-                $points += 13;
-            }
-            if ($suit === $leadSuit && $value > $topValue) {
-                $takesTrick = $id;
-                $topValue = $value;
-            }
-            if ($suit !== $leadSuit && !in_array($id, $this->playersVoidInSuit[$leadSuit])) {
-                $this->playersVoidInSuit[$leadSuit][] = $id;
-            }
-        }
-        $this->gameScores[$takesTrick] += $points;
-        $this->roundScores[$takesTrick] += $points;
+        // most of the info beloe comes back in $data and will need to be unpacked
+        // note analyzeHand also selects strategy
+        $data = $this->intel->gatherInfo($info);
+        $this->unplayedCards = $data['unplayedCards'];
+        $this->gameScores = $data['gameScores'];
+        $this->roundScores = $data['roundScores'];
+        $this->playersVoidInSuit = $data['playersVoidInSuit'];
+        $this->cardsPlayedThisRound = $data['cardsPlayedThisRound'];
         $this->analyzeHand();
-        if ($this->handStrategy === 'shootTheMoon' && $points && $takesTrick !== $this->id) {
-            $this->handStrategy = 'avoidPoints';
-            print $this->name . ' says I shall no longer shoot the moon'."\n";
-            $this->selector = new DefaultSelector(['handAnalysis' => $this->handAnalysis]);
-        }
         $this->cardPlayed = null;
         $this->showHand();
+
+        // $leadSuit = null;
+        // $topValue = null;
+        // $this->gameScores = !empty($info['gameScores']) ? $info['gameScores'] : $this->gameScores;
+        // if (!empty($info['gameScores'])) {
+        //     foreach ($this->gameScores as $id => $score) {
+        //         $this->roundScores[$id] = 0;
+        //     }
+        // }
+
+        // $this->unplayedCards = $this->removeFromUnplayed($info['cardsPlayed']);
+
+        // foreach ($info['cardsPlayed'] as $id => $c) {
+        //     if (empty($this->cardsPlayedThisRound[$id])) {
+        //         $this->cardsPlayedThisRound[$id] = [];
+        //     }
+        //     $this->cardsPlayedThisRound[$id][] = $c;
+        //     if (is_null($leadSuit)) {
+        //         $leadSuit = $c->getSuit();
+        //         $topValue = $c->getValue();
+        //         $takesTrick = $id;
+        //         $points = 0;
+        //     }
+        //     $suit = $c->getSuit();
+        //     $value = $c->getValue();
+        //     if ($suit === 2) {
+        //         $points++;
+        //     }
+        //     if ($suit === 3 && $value == 10) {
+        //         $points += 13;
+        //     }
+        //     if ($suit === $leadSuit && $value > $topValue) {
+        //         $takesTrick = $id;
+        //         $topValue = $value;
+        //     }
+        //     if ($suit !== $leadSuit && !in_array($id, $this->playersVoidInSuit[$leadSuit])) {
+        //         $this->playersVoidInSuit[$leadSuit][] = $id;
+        //     }
+        // }
+        // $this->gameScores[$takesTrick] += $points;
+        // $this->roundScores[$takesTrick] += $points;
+        // $this->analyzeHand();
+        // if ($this->handStrategy === 'shootTheMoon' && $points && $takesTrick !== $this->id) {
+        //     $this->handStrategy = 'avoidPoints';
+        //     print $this->name . ' says I shall no longer shoot the moon'."\n";
+        //     $this->selector = new DefaultSelector(['handAnalysis' => $this->handAnalysis]);
+        // }
+        // $this->cardPlayed = null;
+        // $this->showHand();
     }
 
-    protected function getUnplayedCards()
-    {
-        $allCards = [
-            [0,1,2,3,4,5,6,7,8,9,10,11,12],
-            [0,1,2,3,4,5,6,7,8,9,10,11,12],
-            [0,1,2,3,4,5,6,7,8,9,10,11,12],
-            [0,1,2,3,4,5,6,7,8,9,10,11,12],
-        ];
-        $playedCards = [[],[],[],[],];
-        foreach ($this->hand->getCards() as $c) {
-            $playedCards[$c->getSuit()][] = $c->getValue();
-        }
+    // protected function getUnplayedCards()
+    // {
+    //     $allCards = [
+    //         [0,1,2,3,4,5,6,7,8,9,10,11,12],
+    //         [0,1,2,3,4,5,6,7,8,9,10,11,12],
+    //         [0,1,2,3,4,5,6,7,8,9,10,11,12],
+    //         [0,1,2,3,4,5,6,7,8,9,10,11,12],
+    //     ];
+    //     $playedCards = [[],[],[],[],];
+    //     foreach ($this->hand->getCards() as $c) {
+    //         $playedCards[$c->getSuit()][] = $c->getValue();
+    //     }
 
-        $unplayedCards = [];
+    //     $unplayedCards = [];
 
-        for ($suit=0; $suit<4; $suit++) {
-            $unplayedCards[$suit] = array_values(array_diff($allCards[$suit], $playedCards[$suit]));
-        }
+    //     for ($suit=0; $suit<4; $suit++) {
+    //         $unplayedCards[$suit] = array_values(array_diff($allCards[$suit], $playedCards[$suit]));
+    //     }
 
-        return $unplayedCards;
-    }
+    //     return $unplayedCards;
+    // }
 
-    protected function removeFromUnplayed($cardsPlayedThisTrick)
-    {
-        $playedCards = [[],[],[],[],];
-        foreach ($cardsPlayedThisTrick as $c) {
-            $playedCards[$c->getSuit()][] = $c->getValue();
-        }
+    // protected function removeFromUnplayed($cardsPlayedThisTrick)
+    // {
+    //     $playedCards = [[],[],[],[],];
+    //     foreach ($cardsPlayedThisTrick as $c) {
+    //         $playedCards[$c->getSuit()][] = $c->getValue();
+    //     }
 
-        $unplayedCards = [];
+    //     $unplayedCards = [];
 
-        for ($suit=0; $suit<4; $suit++) {
-            $unplayedCards[$suit] = array_values(array_diff($this->unplayedCards[$suit], $playedCards[$suit]));
-        }
+    //     for ($suit=0; $suit<4; $suit++) {
+    //         $unplayedCards[$suit] = array_values(array_diff($this->unplayedCards[$suit], $playedCards[$suit]));
+    //     }
 
-        return $unplayedCards;
-    }
+    //     return $unplayedCards;
+    // }
 
     public function hasCards()
     {

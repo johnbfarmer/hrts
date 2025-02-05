@@ -1,6 +1,7 @@
 <?php
 
 namespace App\Cards;
+use Illuminate\Support\Facades\Config;
 
 class Game extends BaseProcess {
     protected $numberOfPlayers = 4;
@@ -15,12 +16,7 @@ class Game extends BaseProcess {
     protected $winner = 'nobody';
     protected $inputFileHandler;
     protected $file;
-    protected $playerData = [
-        ['name' => 'Dilbert', 'riskTolerance' => 0.25],
-        ['name' => 'Ululua', 'riskTolerance' => 0.3],
-        ['name' => 'Sally', 'riskTolerance' => 0.2],
-        ['name' => 'Smelch', 'riskTolerance' => 0.35],
-    ];
+    protected $playerData = [];
 
     public function __construct($params)
     {
@@ -34,6 +30,7 @@ class Game extends BaseProcess {
     public function createPlayers()
     {
         $this->writeln('x '.date('Y-m-d H:i:s'));
+        $this->playerData = Config::get('commands.players');
         for ($i = 1; $i <= $this->numberOfPlayers; $i++) {
             $this->players[$i] = new Player($i, $this->playerData[$i-1]);
             $this->scores[$i] = 0;

@@ -12,13 +12,7 @@ class Deck extends BaseProcess {
 
     public function __construct($parameters = [])
     {
-        $this->writeln('params');
-        $this->writeln($parameters);
-        $this->writeln('preShuffledDeck param');
-        // $this->writeln($parameters['preShuffledDeck']);
         $this->preShuffledDeck = empty($parameters['preShuffledDeck']) ? null : $parameters['preShuffledDeck'];
-        $this->writeln('preShuffledDeck');
-        $this->writeln($this->preShuffledDeck);
         if (!empty($this->preShuffledDeck)) {
             foreach ($this->preShuffledDeck as $playerId => $arr) {
                 foreach ($arr as $cardIdx) {
@@ -43,7 +37,6 @@ class Deck extends BaseProcess {
     {
         if (!empty($this->preShuffledDeck)) {
             $this->card = array_shift($this->deck);
-            // print "idx: {$this->card->getDisplay()}\n";
         } else {
             $cardIdx = rand(0, count($this->deck) - 1);
             $this->card = array_splice($this->deck, $cardIdx, 1)[0];
